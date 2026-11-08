@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "plugin-platform-windows-containers"
+version = "0.1.0"  # the plugin's own release (CHANGELOG.md); the platform shows it on the plugin's page
+description = "Windows containers for Liminal: the Containers and Windows Sandbox features, the engines that run Windows containers with their containers (process or Hyper-V isolation) and images, Windows Sandbox and its .wsb files; a container started, stopped or removed, a sandbox launched or closed, each change confirmed."
+readme = "README.md"
+requires-python = ">=3.10"
+# the library it plugs into (the machine kind: liminal_libs.machines, plugin API 2.1; PowerShell through machines.windows)
+dependencies = ["liminal-libs>=1.30.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.entry-points."liminal.providers"]
+windows-containers = "plugin_platform_windows_containers"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

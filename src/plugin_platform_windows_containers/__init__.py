@@ -35,11 +35,12 @@ from pathlib import Path
 from liminal_libs.machines.plugin import CommandError, MachinePlugin
 from liminal_libs.machines.windows import ELEVATE_VAR, PowerShell
 
+from . import apis as cards
 from . import scripts, wsb
 from .engines import (CONTAINER_ID, Container, Engine, compute_systems, containerd_engine, denied_words, docker_engine, json_doc,
                       native, runs_here, server_name, short, words)
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 READ_S = 10.0  # what was read is kept this long: the page's status, the tray's presence and a hook's look share it
 ON, OFF, ABSENT = 1, 2, 3  # Win32_OptionalFeature.InstallState
 CONTAINERS, SANDBOX, HYPERV = "Containers", "Containers-DisposableClientVM", "Microsoft-Hyper-V"
@@ -304,7 +305,10 @@ class WindowsContainersPlugin(MachinePlugin):
     about = ("Windows' own containers on this PC: the features, the engines and their containers (process or Hyper-V "
              "isolation) and images, Windows Sandbox and its .wsb files; a container started, stopped or removed, a sandbox "
              "launched or closed, each change confirmed")
-    api = "2.1"
+    api = "2.2"
+    # what it attaches to (plugin API 2.2): Windows' container platform, the Docker engine at its pipes, nerdctl, Windows
+    # Sandbox (apis.py: each one's pages, parts and calls)
+    apis = cards.APIS
     order = 745
     ICON = "scan"  # a box's corners: what runs inside is kept within them
     HOOKS = (*MachinePlugin.HOOKS, "engines", "containers", "images", "sandboxes", "start_container", "stop_container",
@@ -353,6 +357,58 @@ class WindowsContainersPlugin(MachinePlugin):
     def detach(self) -> None:
         self.forget()
         super().detach()
+
+    def api_facts(self) -> dict:
+        """What it learned of its APIs while it ran (plugin API 2.2), asking nothing: the last read's Windows, features and
+        services, the compute systems listed, each engine (its version, what it runs, its default isolation, its counts, or
+        why it does not answer), containerd's version, Windows Sandbox's command and the sandboxes running; how long ago.
+        Nothing read yet: {}."""
+        with self._kept.lock:
+            r, at = self._kept.reading, self._kept.at
+        if r is None:
+            return {}
+        ago = f"{max(0, int(self._clock() - at))} s ago (kept {READ_S:g} s)"
+        state = {ON: "on", OFF: "off", ABSENT: "not in this edition"}
+        platform: dict[str, str] = {"Read": ago}
+        if r.error:
+            platform["Not read"] = r.error[:200]
+        if r.windows:
+            platform["Windows"] = windows_words(r.windows)
+        platform["Containers"] = state.get(r.features.get(CONTAINERS), "not read")
+        for name in ("vmcompute", "hns"):
+            s = r.services.get(name)
+            if s:
+                platform[name] = f"{str(s.get('Status')).lower()}, {str(s.get('StartType') or '?').lower()}"
+        platform["Compute systems"] = (f"{len(r.hcs)} lines listed" if r.hcs is not None else
+                                       f"not read: {r.hcs_error}" if r.hcs_error else "not asked (the rights)")
+        out = {cards.PLATFORM: platform}
+        docker = {}
+        for e in r.engines:
+            if e.kind != "docker":
+                continue
+            if e.answers:
+                said = f"{e.title} {e.version}: {e.os_type or '?'} containers"
+                if e.isolation:
+                    said += f", {isolation_words(e.isolation)} isolation by default"
+                if e.counted:
+                    said += f", {e.counted[0]} containers ({e.counted[1]} running), {e.counted[2]} images"
+            else:
+                said = f"not answering: {e.why}"[:200]
+            docker[e.key] = said + (f" (the same engine as {e.same_as})" if e.same_as else "")
+        if r.docker or docker:
+            out[cards.DOCKER] = {"docker": r.docker or "not installed", **docker, "Read": ago}
+        if r.nerdctl:
+            c = next((e for e in r.engines if e.kind == "containerd"), None)
+            said = ("not asked" if c is None else f"{c.version}, {c.os_type or '?'} containers" if c.answers
+                    else f"not answering: {c.why}"[:200])
+            out[cards.NERDCTL] = {"nerdctl": r.nerdctl, "containerd": said, "Read": ago}
+        if r.sandbox_on or r.sandbox.program:
+            out[cards.SANDBOX] = {
+                "Windows Sandbox": state.get(r.features.get(SANDBOX), "not read"),
+                "Command": r.sandbox.cli or ("none: its program, WindowsSandbox.exe" if r.sandbox.classic else "none"),
+                "Running": f"{len(r.sandbox.running)} (wsb list)" if r.sandbox.cli else ("yes" if r.sandbox.processes else "none"),
+                "Read": ago}
+        return out
 
     def present(self) -> bool:
         return not self.not_for_here() and validity(self.read())[0]

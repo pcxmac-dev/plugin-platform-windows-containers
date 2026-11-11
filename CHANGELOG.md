@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0 (2026-11-11)
+
+Its API on its page (plugin API 2.2, liminal-libs 1.49.0; the user: "each plugin should reflect the the API its attached
+to, and present links that provide documentation, the plugin interface should more or less contain what it already has,
+BUT, it should also expose more of what the API is about"). Needs liminal-libs>=1.49.0.
+
+- `apis` (apis.py): four cards, read on their makers' pages on 2026-11-11. **Windows containers (Host Compute
+  Service)**: Microsoft's Windows containers documentation (isolation modes, version compatibility, base images, the
+  container platform, requirements, troubleshooting, the HCS's own reference), 13 parts (features, the platform's
+  services, isolation, version compatibility, base images and the compute systems used; networking, storage, gMSA, GPU,
+  resource controls, Dockerfiles, Kubernetes not), the CIM classes, services and `hcsdiag list` it reads. **Docker Engine
+  on Windows (named pipes)**: Microsoft's Configure Docker in Windows, dockerd's pipes, the CLI pages, Docker Desktop and
+  its license; the pipes listed, `docker context ls`, and at each pipe `info`, `ps`, `container inspect`, `images`,
+  `image inspect`, `start`, `stop`, `rm`, beside run, pull, exec and logs it does not. **nerdctl (containerd)**: its
+  command reference, containerd's documentation; `info`, `ps`, `images`, `start`, `stop`, `rm`. **Windows Sandbox
+  (wsb)**: its overview, its command line, the .wsb configuration and its samples; `wsb --raw list`, `start`,
+  `connect`, `stop`, WindowsSandbox.exe with a .wsb, beside exec, share and ip.
+- `api_facts()`: what the last read holds, asking nothing: Windows, the Containers feature, vmcompute and hns, the
+  compute systems listed; each Docker engine at its pipe (its version, Windows or Linux containers, its default
+  isolation and counts, or why it does not answer); containerd's version; Windows Sandbox's command and the sandboxes
+  running; how long ago.
+- Tests: the cards are sound; they name every program and command the plugin runs (read from the scripts the stand-in
+  powershell.exe is given: the read's Invoke-Native calls and each change's) and every cmdlet the read runs, and no
+  other; the facts ask nothing; with LIMINAL_VENDOR_PAGES=1, every address on the cards answers (all did on 2026-11-11).
+
 ## 0.1.0 (2026-11-08)
 
 The first release: Windows containers for the platform (the user: "also if there is a windows container format, a plugin

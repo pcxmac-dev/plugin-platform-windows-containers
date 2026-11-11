@@ -260,7 +260,7 @@ def texts(row: list) -> list:
 # -- what it is ----------------------------------------------------------------------------------------------------------
 def test_the_plugin_is_a_machine_plugin_with_its_changes_as_hooks(folder):
     assert MACHINE.name == "windows-containers" and MACHINE.title == "Windows containers" and MACHINE.KIND == "machine"
-    assert MACHINE.SYSTEM == "platform" and MACHINE.ICON == "scan" and MACHINE.STEPS == () and wc.__version__ == "0.1.0"
+    assert MACHINE.SYSTEM == "platform" and MACHINE.ICON == "scan" and MACHINE.STEPS == () and wc.__version__ == "0.2.0"
     p, fake = plugin(folder=folder)
     hooks = p.interface()["hooks"]
     for hook in ("present", "status", "engines", "containers", "images", "sandboxes", "start_container", "stop_container",

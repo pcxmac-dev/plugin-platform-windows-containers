@@ -74,6 +74,27 @@ one the read found, never one typed. A second confirmation is a refusal naming t
 
 The read hooks `engines`, `containers`, `images` and `sandboxes` give the same as lists, for the platform's other clients.
 
+## Its API
+
+What it attaches to, as its page shows it (plugin API 2.2: `apis.py`, read on the makers' pages on 2026-11-11), each
+one's parts and commands, those the plugin uses first and the rest after them:
+
+- **Windows containers (Host Compute Service)**: [Containers on Windows](https://learn.microsoft.com/en-us/virtualization/windowscontainers/),
+  [isolation modes](https://learn.microsoft.com/en-us/virtualization/windowscontainers/manage-containers/hyperv-container),
+  [version compatibility](https://learn.microsoft.com/en-us/virtualization/windowscontainers/deploy-containers/version-compatibility),
+  the [Host Compute System](https://learn.microsoft.com/en-us/virtualization/api/hcs/overview) and hcsdiag.
+- **Docker Engine on Windows (named pipes)**: [Configure Docker in Windows](https://learn.microsoft.com/en-us/virtualization/windowscontainers/manage-docker/configure-docker-daemon),
+  [dockerd](https://docs.docker.com/reference/cli/dockerd/) and the [docker CLI](https://docs.docker.com/reference/cli/docker/).
+- **nerdctl (containerd)**: [nerdctl](https://github.com/containerd/nerdctl) and its
+  [command reference](https://github.com/containerd/nerdctl/blob/main/docs/command-reference.md).
+- **Windows Sandbox (wsb)**: [Windows Sandbox](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/),
+  its [command line](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli)
+  and [its .wsb configuration](https://learn.microsoft.com/en-us/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file).
+
+`api_facts()` says what the last read holds, asking nothing: the features and services, each engine at its pipe,
+containerd, Windows Sandbox, how long ago. `LIMINAL_VENDOR_PAGES=1 pytest tests/test_apis.py` checks that every address
+on the cards still answers.
+
 ## From the command line
 
 ```

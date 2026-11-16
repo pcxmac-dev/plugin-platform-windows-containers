@@ -40,7 +40,7 @@ from . import scripts, wsb
 from .engines import (CONTAINER_ID, Container, Engine, compute_systems, containerd_engine, denied_words, docker_engine, json_doc,
                       native, runs_here, server_name, short, words)
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 READ_S = 10.0  # what was read is kept this long: the page's status, the tray's presence and a hook's look share it
 ON, OFF, ABSENT = 1, 2, 3  # Win32_OptionalFeature.InstallState
 CONTAINERS, SANDBOX, HYPERV = "Containers", "Containers-DisposableClientVM", "Microsoft-Hyper-V"
@@ -311,6 +311,7 @@ class WindowsContainersPlugin(MachinePlugin):
     apis = cards.APIS
     order = 745
     ICON = "scan"  # a box's corners: what runs inside is kept within them
+    SECTION = "virtualization"  # drawn under the platform's Virtualization plugins (liminal-platform 0.26.0)
     HOOKS = (*MachinePlugin.HOOKS, "engines", "containers", "images", "sandboxes", "start_container", "stop_container",
              "remove_container", "launch_sandbox", "stop_sandbox")
 

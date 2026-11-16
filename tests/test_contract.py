@@ -11,3 +11,10 @@ def test_every_plugin_here_conforms_to_the_class_contract():
     assert found and all(p.api == "2.2" and not p.is_record for p in found)
     assert {p.SYSTEM for p in found} == {"platform"} and {p.KIND for p in found} == {"machine"}
     assert {p.ICON for p in found} == {"scan"}
+
+
+def test_it_is_drawn_under_the_platforms_virtualization_plugins():
+    """Its section of the platform's list (liminal-platform 0.26.0; the user, 2026-11-15: "platform needs a virtualization
+    plugins section"; "just like cloud plugins"): Virtualization plugins, beside the machine's own, the OS and the cloud
+    plugins."""
+    assert {p.SECTION for p in assert_module_conforms(module)} == {"virtualization"}

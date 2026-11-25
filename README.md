@@ -85,6 +85,12 @@ Hyper-V otherwise; newer than this Windows: cannot). Every service joins the eng
 one per host: Liminal never makes or removes one), which the plan says "differs" and asks you to accept. GoCD and
 Buildbot are not offered here yet: their makers publish Linux images alone.
 
+Since 0.3.1 (liminal-libs 1.95.0's hooks): the firewall is told the `nat` network as the engine has it (its prefix
+reserved as it is, HNS giving the addresses, shared, no route); each target says this Windows' build and the isolation
+a pin of that build gets (`os_build`, `isolation`), so that a service plugin picks its pin with
+`containers.choose_pin(pins, options["target"])`; GoCD and Buildbot are told "not yet" through `no_spec_fit`; and each
+plan says where the engine keeps its data (`docker info`'s DockerRootDir).
+
 ## Its API
 
 What it attaches to, as its page shows it (plugin API 2.2: `apis.py`, read on the makers' pages on 2026-11-11), each

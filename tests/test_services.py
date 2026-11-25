@@ -7,10 +7,8 @@ opened, no NAT network is made."""
 from __future__ import annotations
 
 import copy
-import io
 import json
 import subprocess
-import tarfile
 
 import pytest
 
@@ -18,8 +16,10 @@ from liminal_libs.apps import App, asking
 from liminal_libs.apps.asking import AskRefused
 from liminal_libs.instances import Refusal
 from liminal_libs.machines import standins
+from liminal_libs.machines import containers
+from liminal_libs.machines.containerhost import Create
 from liminal_libs.machines.containers import ImagePin, ServiceSpec
-from liminal_libs.machines.standins import FakeDocker, ServiceOwner, StandInNetworkHost
+from liminal_libs.machines.standins import FakeWindowsDocker, ServiceOwner, StandInNetworkHost
 from plugin_platform_windows_containers import Refusal as PluginRefusal
 from plugin_platform_windows_containers import WindowsContainersPlugin, scripts, services
 from liminal_libs.machines.windows import PowerShell
@@ -29,98 +29,7 @@ PIPE = "npipe:////./pipe/docker_engine"
 DIG = "sha256:" + "a" * 64
 SECRET = "canary-Wn42-never-shown"
 HOME = "C:\\ProgramData\\Jenkins\\JenkinsHome"
-NAT_PREFIX = "172.29.16.0/20"
-BUILDS = {20348: "10.0.20348.2655", 17763: "10.0.17763.7792", 26100: "10.0.26100.6899", 26400: "10.0.26400.1"}
-
-
-def _norm(path: str) -> str:
-    return str(path or "").replace("\\", "/").rstrip("/")
-
-
-class FakeWindowsDocker(FakeDocker):
-    """The library's FakeDocker as docker.exe at a pipe answers: its global -H skipped, --isolation taken, Windows'
-    paths inside a container (C:\\...), the engine's own nat network (HNS hands its members their addresses), an image's
-    OsVersion, and the image's cmd, tar.exe and PowerShell in throwaway containers."""
-
-    VALUED = (*FakeDocker.VALUED, "--isolation", "-H")
-
-    def __init__(self, nat: bool = True, build: int = 20348):
-        super().__init__(version="27.3.1")
-        self.build = build
-        self.next_ip = 10
-        if nat:
-            self.networks["nat"] = {"id": "e" * 64, "labels": {}, "options": {}, "subnet": NAT_PREFIX,
-                                    "gateway": "172.29.16.1", "ip_range": "", "driver": "nat"}
-
-    def _words(self, argv):
-        argv = [str(a) for a in argv]
-        if len(argv) > 2 and argv[1] == "-H":
-            return argv[3:]
-        return super()._words(argv)
-
-    def _answer(self, key, args, stdin, env, out):
-        if key == "image inspect" and "{{.OsVersion}}" in args:
-            ref = args[-1]
-            return (0, BUILDS.get(self.build, f"10.0.{self.build}.1"), "") if ref in self.images else \
-                (1, "", f"Error: No such image: {ref}")
-        return super()._answer(key, args, stdin, env, out)
-
-    def _create(self, args, env):
-        code, cid, err = super()._create(args, env)
-        if code == 0:
-            c = next(x for x in self.containers.values() if x["id"] == cid)
-            c["mounts"] = []
-            for v in [args[i + 1] for i, a in enumerate(args) if a == "-v"]:
-                vol, _, path = v.partition(":")
-                c["mounts"].append((vol, path[:-3] if path.endswith(":ro") else path))
-            if c["network"] == "nat":
-                self.next_ip += 1
-                c["ip"] = f"172.29.16.{self.next_ip}"
-        return code, cid, err
-
-    def _volume_at(self, c, path):
-        best = None
-        for vol, mount in c["mounts"]:
-            m = _norm(mount)
-            p = _norm(path)
-            if p == m or p.startswith(m + "/"):
-                if best is None or len(m) > len(best[1]):
-                    best = (vol, m)
-        return best
-
-    def _read_path(self, c, path):
-        found = self._volume_at(c, path)
-        if found is None:
-            return None
-        vol, mount = found
-        return self.volumes.get(vol, {}).get("files", {}).get(_norm(path)[len(mount):].lstrip("/"))
-
-    def _cp(self, args, stdin):
-        words = [a for a in args[1:] if a != "-a"]
-        if words[0] == "-":
-            c = self._find(words[1].split(":", 1)[0])
-            if words[1].split(":", 1)[1] != "C:\\":
-                return 1, "", "the stand-in takes seeds at C:\\ alone"
-            with tarfile.open(fileobj=io.BytesIO(stdin or b""), mode="r:") as tar:
-                for m in tar.getmembers():
-                    path = "C:/" + m.name
-                    found = self._volume_at(c, path)
-                    if found is None:
-                        return 1, "", f"the stand-in writes seeds into volumes alone, not {path}"
-                    vol, mount = found
-                    rel = _norm(path)[len(mount):].lstrip("/")
-                    if rel in self.volumes[vol]["files"]:
-                        return 1, "", f"the stand-in: {path} is there already"
-                    self.volumes[vol]["files"][rel] = tar.extractfile(m).read()
-            return 0, "", ""
-        return super()._cp(args, stdin)
-
-    def _run(self, args, stdin, out):
-        if args[args.index("--entrypoint") + 1] == "powershell":
-            vol = [args[i + 1] for i, a in enumerate(args) if a == "-v"][0].split(":")[0]
-            self.volumes[vol]["files"].clear()
-            return 0, "", ""
-        return super()._run(args, stdin, out)
+NAT_PREFIX = standins.NAT_PREFIX  # "172.29.16.0/20", the library's stand-in's (1.95.0)
 
 
 class Frame(App):
@@ -241,7 +150,7 @@ def test_an_install_runs_docker_exe_at_its_pipe_and_never_powershell(world):
     assert cp["argv"][-2:] == ["-", "liminal-jenkins-ci-controller:C:\\"]
     said = json.dumps([plan, end, world.page("windows-containers", "status")])
     assert SECRET not in said
-    assert any("found" in line_ and "liminal-jenkins-ci" in line_ for line_ in end["lines"])  # nat joined, none made
+    assert any("its network nat found" in line_ and "its engine's own, shared" in line_ for line_ in end["lines"])  # joined
 
 
 def test_a_linux_image_cannot_run_on_windows_containers(world):
@@ -324,7 +233,9 @@ def test_remove_keeps_the_nat_network_and_its_data(world):
     _, end = world.carry("remove")
     assert end["ok"] and world.fake.argv_of("network rm") == [] and "nat" in world.fake.networks
     assert "liminal-jenkins-ci-home" in world.fake.volumes and world.fake.containers == {}
-    assert any("it stays" in line for line in end["lines"])
+    assert any("its engine's own network nat is left as it is (shared)" in line for line in end["lines"])  # 0.3.1: never asked
+    with pytest.raises(Refusal, match="it stays"):  # and its runtime refuses to drop it all the same
+        world.runtime().drop_network("nat")
 
 
 def test_segments_are_the_shared_nat_network_with_its_members(world):
@@ -491,3 +402,73 @@ def service_flow(tmp_path) -> FakeWindowsDocker:
     w.carry("delete_data", options={"backups": "delete"})
     w.jenkins.call("segments")
     return w.fake
+
+
+# -- 0.3.1: liminal-libs 1.95.0's hooks -------------------------------------------------------------------------------------
+def test_the_firewall_is_told_the_engines_own_nat_network_as_it_is(world):
+    """network_want: the nat network, its prefix as read (found), HNS giving the addresses, shared, no route."""
+    assert world.runtime().network_want(None, "jenkins/ci") == {"network": "nat", "found": NAT_PREFIX, "assigns": "hns",
+                                                                "shared": True, "route": False}
+    world.grant()
+    plan, end = world.carry("install", spec(), target="docker_engine")
+    assert end["ok"], end
+    a = next(x for x in world.firewall._book.all() if x.sid == "jenkins/ci")
+    assert (a.prefix, a.found, a.shared, a.assigns, a.addresses, a.route) == (NAT_PREFIX, True, True, "hns", {}, None)
+    assert not any(s["kind"] == "route" for steps in world.firewall.ran for s in steps)  # no route asked
+    said = " ".join(line for steps in world.firewall.ran for line in [str(steps)])
+    assert "route" not in said
+    assert world.fake.argv_of("network create") == [] and "--network nat" in " ".join(world.fake.argv_of("create")[0])
+
+
+def test_a_second_service_shares_the_nat_prefix_and_neither_frees_it(world):
+    world.grant()
+    world.carry("install", spec(), target="docker_engine")
+    world.page("windows-containers", "grant_service", "gocd", "docker_engine")
+    other = spec(owner="jenkins", name="ci", host=8090)  # the same recipe, a second service of its own
+    other["name"] = "two"
+    plan = world.jenkins.call("service_plan", "install", "jenkins/two", other, "docker_engine", {})
+    assert plan.get("plan") and not plan.get("refused"), plan  # the shared prefix is reserved for both
+    shared = [x for x in world.firewall._book.all() if x.prefix == NAT_PREFIX]
+    assert {x.sid for x in shared} == {"jenkins/ci", "jenkins/two"} and all(x.shared for x in shared)
+
+
+def test_create_joins_the_nat_network_alone(world):
+    pin = ImagePin.of(spec()["parts"][0]["image"])
+    part = ServiceSpec.of(spec()).parts[0]
+    assert pin.os_build == 20348
+    with pytest.raises(Refusal, match="joins the engine's own nat network alone"):
+        world.runtime().create(Create("liminal-jenkins-ci-controller", part, {}, (), (), {}, {}, "liminal-jenkins-ci", "",
+                                      "controller", (), (), "no"))
+    assert world.fake.changes() == []
+    # an address the base hands (none with HNS assigning; a reserved one all the same) never becomes --ip on nat
+    world.runtime().create(Create("liminal-jenkins-ci-controller", part, {}, (), (), {}, {}, "nat", "172.29.16.40",
+                                  "controller", (), (), "no"))
+    create = world.fake.argv_of("create")[0]
+    assert "--ip" not in create and create[create.index("--network") + 1] == "nat"
+
+
+def test_each_target_says_its_windows_build_and_isolation_and_a_pin_is_chosen_by_it(tmp_path):
+    w = World(tmp_path)  # Windows 11 build 26300, Hyper-V on
+    row = w.jenkins.call("hosting", "jenkins", {})["targets"][0]
+    assert (row["os_build"], row["isolation"]) == (26300, "process")
+    pins = [{**spec(build=b)["parts"][0]["image"], "digest": "sha256:" + d * 64} for b, d in
+            ((17763, "1"), (20348, "2"), (26100, "3"), (26400, "4"))]
+    assert containers.choose_pin(pins, row).os_build == 26100  # the newest older than this build (no 26300 pin)
+    assert containers.choose_pin(pins + [{**pins[0], "os_build": 26300}], row).os_build == 26300  # its own build first
+
+
+def test_gocd_and_buildbot_are_told_not_yet_through_no_spec_fit_and_others_are_not(world):
+    t = world.plugin.target("docker_engine")
+    for owner in ("gocd", "buildbot"):
+        fit = world.plugin.no_spec_fit(t, owner)
+        assert fit.parts["image"].fit == "cannot" and "not yet" in fit.takes and "decision 14 a" in fit.takes
+    assert world.plugin.no_spec_fit(t, "jenkins") is None
+    assert "hosting" not in type(world.plugin).__dict__  # the base's hosting, answered through its hook
+
+
+def test_each_plan_says_where_the_engine_keeps_its_data(world):
+    world.grant()
+    plan = world.jenkins.call("service_plan", "install", "jenkins/ci", spec(), "docker_engine", {})
+    words = world.page("windows-containers", "plan_words", plan["plan"])["words"]
+    assert "(C:\\ProgramData\\docker)" in words and "in the engine's data folder" in words
+    assert world.fake.argv_of("info") == [[DOCKER, "-H", PIPE, "info", "--format", "{{json .DockerRootDir}}"]]

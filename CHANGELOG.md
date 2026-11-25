@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.1 (2026-11-25)
+
+On liminal-libs 1.95.0's hooks (SERVICE-INTERFACE.md §9.2); needs liminal-libs>=1.95.0.
+- **The engine's own network, in the library's words**: its runtime's `network_want` answers `{"network": "nat",
+  "found": <the nat prefix read>, "assigns": "hns", "shared": True, "route": False}`, so the firewall reserves that
+  prefix as it is (none handed out of the pool, no address given: HNS gives them), records it shared, and makes no
+  route; the base names `nat` on the install line and in `create`, and its Remove never drops it ("left as it is
+  (shared)"). `create` joins the network the base names and refuses any but `nat`.
+- **Each target's build**: `Target.os_build` (this Windows' build) and `Target.isolation` (what a pin of that same build
+  gets here: process, or Hyper-V on a client that needs it). A service plugin picks its pin with
+  `containers.choose_pin(pins, options["target"])` at Install…; the plugin's own `choose_pin` stays for its fit.
+- **GoCD and Buildbot "not yet"** through the base's `no_spec_fit(target, owner)`, in place of its own `hosting`.
+- **Where the data lives**: `read_root` on its runtime, so each plan says the engine's DockerRootDir
+  (C:\ProgramData\docker) beside the target's words; `docker -H PIPE info --format {{json .DockerRootDir}}` is named on
+  its API card.
+- **Its tests** use the library's `standins.FakeWindowsDocker` in place of their own copy.
+
 ## 0.3.0 (2026-11-25)
 
 Windows containers host Liminal's services: liminal-libs 1.93.0's one "run a service" interface (`ContainerHost`) on each

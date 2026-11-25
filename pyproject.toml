@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "plugin-platform-windows-containers"
-version = "0.3.0"  # the plugin's own release (CHANGELOG.md); the platform shows it on the plugin's page
+version = "0.3.1"  # the plugin's own release (CHANGELOG.md); the platform shows it on the plugin's page
 description = "Windows containers for Liminal: the Containers and Windows Sandbox features, the engines that run Windows containers with their containers (process or Hyper-V isolation) and images, Windows Sandbox and its .wsb files; a container started, stopped or removed, a sandbox launched or closed, each change confirmed."
 readme = "README.md"
 requires-python = ">=3.10"
 # the library it plugs into (the machine kind: liminal_libs.machines, plugin API 2.2: its API cards since 1.49.0; PowerShell through
-# machines.windows; the one "run a service" interface, ContainerHost and DockerRuntime, since 1.93.0)
-dependencies = ["liminal-libs>=1.93.0"]
+# machines.windows; the one "run a service" interface, ContainerHost and DockerRuntime, since 1.93.0; its hooks for an
+# engine's own network, a target's build, "not yet" and the data root since 1.95.0)
+dependencies = ["liminal-libs>=1.95.0"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

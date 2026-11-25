@@ -49,7 +49,7 @@ from . import scripts, services, wsb
 from .engines import (CONTAINER_ID, Container, Engine, compute_systems, containerd_engine, denied_words, docker_engine, json_doc,
                       native, runs_here, server_name, short, words)
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 READ_S = 10.0  # what was read is kept this long: the page's status, the tray's presence and a hook's look share it
 ON, OFF, ABSENT = 1, 2, 3  # Win32_OptionalFeature.InstallState
 CONTAINERS, SANDBOX, HYPERV = "Containers", "Containers-DisposableClientVM", "Microsoft-Hyper-V"
@@ -696,11 +696,15 @@ class WindowsContainersPlugin(ContainerHost):
                 state, why = "ready", ""
             where = ("in Docker Desktop's data folder" if e.desktop else
                      "in the engine's data folder (C:\\ProgramData\\docker\\volumes)")
+            # 0.3.1 (liminal-libs 1.95.0): this Windows' build, what a service plugin's containers.choose_pin picks a pin
+            # by, and the isolation a pin of that same build gets here
+            same = services.isolation_for(r.host_build, r.client, r.on(HYPERV), r.host_build)[0] if r.host_build else ""
             out.append(Target(id=e.key, plugin=self.name, title=f"{e.title} {e.version} at {e.key} ({build})".replace("  ", " "),
                               mechanism="nerdctl" if e.kind == "containerd" else "docker-windows", system="windows",
                               arch="amd64", here=True, state=state, why=why, reach="127.0.0.1", path="direct",
                               lan_words=services.LAN_WORDS, firewall="windows", stack="windows",
-                              platform=self._platform(), where_data=where, version=e.version))
+                              platform=self._platform(), where_data=where, version=e.version,
+                              os_build=int(r.host_build or 0), isolation=same))
         return out
 
     def _runtime(self, e: Engine) -> services.WindowsRuntime:
@@ -717,17 +721,13 @@ class WindowsContainersPlugin(ContainerHost):
             raise Refusal(f"{target.id} does not answer for Windows containers now: {e.why if e and e.why else 'it is not here'}")
         return self._runtime(e)
 
-    def hosting(self, owner: str = "", specs=None) -> dict:
-        """The base's answer; and for GoCD and Buildbot, which hand a Linux spec alone, each target's fit says "not yet"
-        (decision 14 a: their makers publish no Windows image)."""
-        out = ContainerHost.hosting(self, owner, specs)
-        given = dict(specs or {}) if isinstance(specs, dict) else {}
-        who = str(owner or next((s.get("owner") for s in given.values() if isinstance(s, dict)), "") or "")
-        if who in services.NOT_YET and not given.get("windows"):
-            for row in out["targets"]:
-                if row.get("fit") is None:
-                    row["fit"] = Fit.judged({"image": Aspect("cannot", services.NOT_YET[who])}).as_dict()
-        return out
+    def no_spec_fit(self, target: Target, owner: str) -> Fit | None:
+        """0.3.1 (liminal-libs 1.95.0's hook, in place of its own hosting): GoCD and Buildbot, which hand a Linux spec
+        alone, are told "not yet" on every target (decision 14 a: their makers publish no Windows image); any other
+        owner without a Windows spec, nothing (its page says its recipe has no Windows image)."""
+        if owner in services.NOT_YET:
+            return Fit.judged({"image": Aspect("cannot", services.NOT_YET[owner])})
+        return None
 
     def service_reads_wanted(self) -> bool:
         """Whether its page reads its engines' services now: once a service plugin asked, a grant was made, a plan or a

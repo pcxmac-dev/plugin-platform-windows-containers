@@ -139,6 +139,10 @@ DOCKER_ON_WINDOWS = Api(
              used="a context's pipe asked too", docs=_CLI + "context/ls/"),
         Call("docker -H PIPE info", "the engine: version, OSType, isolation, counts (GET /info)", "System info",
              used="the Engines table", docs=_CLI + "system/info/"),
+        Call("docker -H PIPE info --format {{json .DockerRootDir}}", "the engine's own facts: here its data root (GET /info)",
+             "System info", docs=_CLI + "system/info/",
+             used=("0.3.1: where a service's data lives on its engine (DockerRootDir: C:\\ProgramData\\docker), said on "
+                   "each of its plans (liminal-libs 1.95.0's read_root)")),
         Call("docker -H PIPE ps -a --no-trunc", "every container (GET /containers/json)", "Containers",
              used="the Containers table", docs=_CLI + "container/ls/"),
         Call("docker -H PIPE container inspect ID...", "each container's isolation, platform and start", "Containers",

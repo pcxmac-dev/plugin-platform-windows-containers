@@ -12,8 +12,10 @@ own pipe, with what Windows containers do otherwise.
   GoCD and Buildbot are "not yet": their makers publish Linux images alone (decision 14 a).
 - **The engine's one NAT network** (N26). Windows holds one NAT network per host, and a second leaves WinNAT in an
   unknown state, so Liminal makes none and removes none: every service joins the engine's own `nat`, read at each
-  plan, and the fit says "differs" (one service can reach another's ports), which asks accept_differs. The firewall's
-  plan for it carries no route (this PC holds the NAT gateway on vEthernet (nat)). HNS gives the addresses (no --ip:
+  plan, and the fit says "differs" (one service can reach another's ports), which asks accept_differs. Since 0.3.1
+  (liminal-libs 1.95.0's `Runtime.network_want`) the firewall is told so in the library's words: the network `nat`,
+  its prefix as read (`found`), HNS giving the addresses, shared by every service, no route (this PC holds the NAT
+  gateway on vEthernet (nat)); the base names `nat` on the install line and never drops it. HNS gives the addresses (no --ip:
   whether it works on the engine's own NAT network is still to check), and Docker's own names on a NAT network find
   the containers by their names (no network aliases there).
 - **Ports** are WinNAT's mappings on every IPv4 address of this PC: Windows' NAT takes no host address, so a port
@@ -171,7 +173,9 @@ def isolation_for(host_build: int, client: bool, hyperv: bool, image_build: int)
 
 def choose_pin(pins, host_build: int, client: bool, hyperv: bool) -> ImagePin | None:
     """Of a service's Windows pins (one per Windows Server build: ltsc2022, ltsc2025), the one this Windows runs best:
-    process isolation first, then the newest that runs with Hyper-V isolation; None when none runs here."""
+    process isolation first, then the newest that runs with Hyper-V isolation; None when none runs here. The plugin's
+    own, for its fit: a service plugin picks with liminal-libs 1.95.0's `containers.choose_pin(pins,
+    options["target"])` at Install… (each target says its `os_build` and `isolation` since 0.3.1)."""
     best = None
     for raw in pins:
         pin = raw if isinstance(raw, ImagePin) else ImagePin.of(raw)
@@ -211,8 +215,10 @@ class WindowsRuntime(DockerRuntime):
                  client: bool = True, hyperv: bool = False, where_data: str = "", lan_words: str = LAN_WORDS):
         if not exe or not str(endpoint).startswith("npipe:"):
             raise Refusal("a Windows engine is reached at its own pipe (npipe:) by docker.exe alone")
+        # 0.3.1: read_root (liminal-libs 1.95.0): docker info's DockerRootDir (C:\ProgramData\docker) said on each plan
         super().__init__([exe, "-H", endpoint], runner, streamer, version=version, arch="amd64", wsl=False, trusted=(),
-                         lan=("direct", lan_words), where_data=where_data or "in the engine's data folder")
+                         lan=("direct", lan_words), where_data=where_data or "in the engine's data folder",
+                         read_root=True)
         self.host_build, self.client, self.hyperv = int(host_build or 0), bool(client), bool(hyperv)
 
     # -- what it reads ----------------------------------------------------------------------------------------------------
@@ -229,6 +235,17 @@ class WindowsRuntime(DockerRuntime):
         return {"subnet": str((ipam[0] if ipam else {}).get("Subnet") or ""),
                 "gateway": str((ipam[0] if ipam else {}).get("Gateway") or ""),
                 "members": dict(n.get("Containers") or {})}
+
+    def network_want(self, spec: ServiceSpec | None, sid: str) -> dict:
+        """0.3.1 (liminal-libs 1.95.0): what the engine has for every service's network, laid over the base's Want: its
+        one `nat`, its prefix as read now (`found`, reserved as it is and never handed out of the pool), HNS giving the
+        addresses, shared by every service (never dropped), and no route (the Windows firewall's own stack). With no
+        nat there the prefix is not said, and the firewall refuses the shared network in words."""
+        want = {"network": NAT, "assigns": "hns", "shared": True, "route": False}
+        nat = self.nat()
+        if nat is not None and nat["subnet"]:
+            want["found"] = nat["subnet"]
+        return want
 
     def fit(self, spec: ServiceSpec | None) -> Fit:
         aspects: dict[str, Aspect] = {}
@@ -330,6 +347,9 @@ class WindowsRuntime(DockerRuntime):
         iso, words = self.isolation(part.image)
         if not iso:
             raise Refusal(f"{c.name}: {words}")
+        if c.network != NAT:  # 0.3.1: the base names the network network_want gives; any other is never joined
+            raise Refusal(f"{c.name}: a Windows container joins the engine's own {NAT} network alone, not "
+                          f"{str(c.network)[:60]}")
         labels = dict(c.labels)
         if "liminal.spec" in labels:
             labels["liminal.spec"] = _labelled_spec(ServiceSpec.of(json.loads(labels["liminal.spec"])))
@@ -337,7 +357,7 @@ class WindowsRuntime(DockerRuntime):
                 "--memory", str(part.memory)]
         if part.cpus:
             args += ["--cpus", f"{part.cpus:g}"]
-        args += ["--hostname", c.hostname or part.name, "--network", NAT]
+        args += ["--hostname", c.hostname or part.name, "--network", c.network]
         for h in c.add_hosts:
             args += ["--add-host", h]
         for p in c.ports:

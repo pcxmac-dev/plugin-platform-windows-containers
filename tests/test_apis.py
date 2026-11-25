@@ -21,7 +21,7 @@ from test_plugin import BUILD, CLASSIC, DOCKER, IIS, NERDCTL, PINGER, SANDBOX_ID
 NATIVE = re.compile(r"Invoke-Native (\$out\.Docker|\$out\.Nerdctl|\$out\.Hcsdiag|\$wsb) \(?@\(([^)]*)\)")
 PROGRAMS = {"$out.Docker": "docker", "$out.Nerdctl": "nerdctl", "$out.Hcsdiag": "hcsdiag", "$wsb": "wsb",
             DOCKER: "docker", NERDCTL: "nerdctl", WSB: "wsb", CLASSIC: "WindowsSandbox.exe"}
-GROUPS = {"context", "container", "image"}  # docker's two-word commands among those asked
+GROUPS = {"context", "container", "image", "volume", "network"}  # docker's two-word commands among those asked
 CMDLET = re.compile(r"(?<![-\w'])[A-Z][a-z]+-[A-Z][A-Za-z]+(?![-\w'])")  # Verb-Noun, never quoted (a feature's name is)
 PLUMBING = {"ForEach-Object", "Where-Object", "Select-Object", "Write-Output", "Get-Command", "Test-Path", "Join-Path",
             "New-Object", "ConvertFrom-Json", "ConvertTo-Json", "Invoke-Native", "Find-Program"}  # PowerShell's, the script's
@@ -96,12 +96,16 @@ def test_its_cards_are_sound_and_written_for_plugin_api_2_2():
         assert len(a.areas) > len(a.covered) and len(a.calls) > len(a.used)  # more of the API than the plugin uses
 
 
-def test_the_cards_name_every_command_and_cmdlet_the_plugin_runs_and_no_other(folder):
+def test_the_cards_name_every_command_and_cmdlet_the_plugin_runs_and_no_other(folder, tmp_path):
     fake, old = flows(folder)
     text = "\n".join(fake.scripts + old.scripts)
     ran_ = {command(PROGRAMS[exe], [a or b for a, b in re.findall(r"'([^']*)'|(\$\w+)", args)])
             for exe, args in NATIVE.findall(scripts.READ)}  # the read's programs, as its script writes them
     ran_ |= {command(PROGRAMS[exe], argv) for exe, argv in fake.ran + old.ran}  # each change's, as it was given
+    # 0.3.0: every docker.exe command a service's plans run, as the plugin's runner was given it
+    from test_services import service_flow
+
+    ran_ |= {command("docker", c["argv"][1:]) for c in service_flow(tmp_path).calls}
     if "'connect --id '" in text:  # the window of a sandbox wsb started, opened apart (ProcessStartInfo)
         ran_.add("wsb connect")
     programs = {cards.DOCKER: "docker", cards.NERDCTL: "nerdctl", cards.SANDBOX: "wsb", cards.PLATFORM: "hcsdiag"}
@@ -122,7 +126,9 @@ def test_the_cards_name_every_command_and_cmdlet_the_plugin_runs_and_no_other(fo
     writes = {command(c.name.split()[0], c.name.split()[1:]) for a in wc.MACHINE.apis for c in a.used if c.writes
               and c.name.split()[0] in ("docker", "nerdctl", "wsb")}
     assert writes == {"docker start", "docker stop", "docker rm", "nerdctl start", "nerdctl stop", "nerdctl rm", "wsb start",
-                      "wsb stop"}
+                      "wsb stop",  # and since 0.3.0 a service's, inside its approved plan's work alone
+                      "docker pull", "docker create", "docker cp", "docker rename", "docker run", "docker exec",
+                      "docker volume create", "docker volume rm"}
     assert not any(c.costs for a in wc.MACHINE.apis for c in a.calls)
 
 

@@ -74,6 +74,17 @@ one the read found, never one typed. A second confirmation is a refusal naming t
 
 The read hooks `engines`, `containers`, `images` and `sandboxes` give the same as lists, for the platform's other clients.
 
+## Liminal's services (0.3.0)
+
+It hosts Liminal's services through liminal-libs 1.93.0's one "run a service" interface (`ContainerHost`: `hosting`,
+`service_plan`, `approve_plan`, `apply_plan`, `service_work` and the rest), on each Docker engine for Windows containers
+at its pipe. A service plugin's plan is said in this plugin's words and approved on its page (each accept in turn); its
+work runs `docker.exe -H npipe:////./pipe/<pipe>` directly, windowless, never a PowerShell script, a secret by
+environment alone. Windows images only, each with the isolation its pinned build gets here (process where it can,
+Hyper-V otherwise; newer than this Windows: cannot). Every service joins the engine's one `nat` network (Windows holds
+one per host: Liminal never makes or removes one), which the plan says "differs" and asks you to accept. GoCD and
+Buildbot are not offered here yet: their makers publish Linux images alone.
+
 ## Its API
 
 What it attaches to, as its page shows it (plugin API 2.2: `apis.py`, read on the makers' pages on 2026-11-11), each

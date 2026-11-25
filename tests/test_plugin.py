@@ -249,6 +249,9 @@ def plugin(fake=None, env=None, system="win32", clock=None, folder=None):
     return p, fake
 
 
+SERVICE_FORMS = {"approve", "decline", "grant", "revoke", "forget"}  # 0.3.0's, the base's
+
+
 def table(st: dict, title: str) -> dict:
     return next(t for t in st["tables"] if t["title"] == title)
 
@@ -260,12 +263,17 @@ def texts(row: list) -> list:
 # -- what it is ----------------------------------------------------------------------------------------------------------
 def test_the_plugin_is_a_machine_plugin_with_its_changes_as_hooks(folder):
     assert MACHINE.name == "windows-containers" and MACHINE.title == "Windows containers" and MACHINE.KIND == "machine"
-    assert MACHINE.SYSTEM == "platform" and MACHINE.ICON == "scan" and MACHINE.STEPS == () and wc.__version__ == "0.2.1"
+    assert MACHINE.SYSTEM == "platform" and MACHINE.ICON == "scan" and MACHINE.STEPS == () and wc.__version__ == "0.3.0"
     p, fake = plugin(folder=folder)
     hooks = p.interface()["hooks"]
     for hook in ("present", "status", "engines", "containers", "images", "sandboxes", "start_container", "stop_container",
-                 "remove_container", "launch_sandbox", "stop_sandbox"):
+                 "remove_container", "launch_sandbox", "stop_sandbox",
+                 # 0.3.0: the one "run a service" interface (liminal-libs 1.93.0's ContainerHost)
+                 "hosting", "hosted", "hosted_logs", "exposures", "plan_words", "service_work", "service_plan",
+                 "approve_plan", "decline_plan", "apply_plan", "service_cancel", "hosted_file", "release_owned",
+                 "grant_service", "revoke_service", "forget_volume", "segments"):
         assert hook in hooks
+    assert MACHINE.RUNTIME == "windows-containers"
     assert "setup" not in hooks and fake.scripts == [] and p.instances() == ()  # the Windows engine is not offered for Linux images
 
 
@@ -277,8 +285,10 @@ def test_each_form_gives_its_hooks_arguments_in_order(folder):
     for f in st["forms"]:
         params = list(inspect.signature(getattr(p, f["hook"])).parameters)
         assert [x["name"] for x in f["fields"]] == params[:len(f["fields"])], f["id"]
-    assert {x["name"] for f in st["forms"] for x in f["fields"] if x["type"] == "accept"} == {"accept_force", "accept_settings"}
-    assert {f["id"] for f in st["forms"] if f["confirm"].get("danger")} == {"remove", "close_sandbox"}
+    own = [f for f in st["forms"] if f["id"] not in SERVICE_FORMS]
+    assert {x["name"] for f in own for x in f["fields"] if x["type"] == "accept"} == {"accept_force", "accept_settings"}
+    assert SERVICE_FORMS <= ids  # 0.3.0: the base's Approve…, Decline…, Let it…, Stop letting it…, Forget…
+    assert {f["id"] for f in own if f["confirm"].get("danger")} == {"remove", "close_sandbox"}
 
 
 # -- the status ----------------------------------------------------------------------------------------------------------

@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.3.0 (2026-11-25)
+
+Windows containers host Liminal's services: liminal-libs 1.93.0's one "run a service" interface (`ContainerHost`) on each
+Docker engine for Windows containers at its own pipe, through the library's `DockerRuntime` (services.py:
+`WindowsRuntime`). Monday list items 34 and 35's foundation; service-containers-design §4.2 and the networking design's
+§5.2. Needs liminal-libs>=1.93.0.
+- **Its targets**: each Docker engine for Windows containers at its pipe (Docker Engine, Docker Desktop switched to
+  Windows containers), ready while it answers; one engine at two pipes once. A denied pipe ("denied": docker-users),
+  one not answering, and Docker Desktop running Linux containers ("other kind": the Docker plugin hosts those, and no
+  plugin switches its kind) are not ready and are asked nothing; containerd through nerdctl is listed, "not offered"
+  until its port mappings and restart choices are checked.
+- **docker.exe, run directly** (`docker.exe -H npipe:////./pipe/<pipe> ...`), windowless, never inside a PowerShell
+  script; no UAC path for a service's commands, so a secret given by environment (`-e NAME`, its value in docker.exe's
+  environment alone) is never handed to an elevation. The runner leaves Liminal's variables and every plugin's declared
+  pairs out of docker.exe's environment.
+- **Windows images alone, each part's isolation from its pin's `os_build`** against this Windows' build (`runs_here`,
+  Microsoft's version compatibility): process isolation where that build runs that way here, Hyper-V isolation
+  otherwise (it needs Hyper-V: "cannot" while it is off); an image newer than this Windows, or with no build pinned,
+  cannot; a Linux image cannot. `choose_pin` picks, of a service's Windows pins, the one this Windows runs best. The
+  fit says each part's isolation and its size (Server Core images are several GB).
+- **GoCD and Buildbot "not yet"** (decision 14 a: their makers publish Linux images alone): their fit on every target
+  says so, for the Linux spec they hand and for any Windows spec made for them.
+- **The engine's one NAT network** (N26): Windows holds one per host, so Liminal makes none and removes none. Every
+  service joins the engine's own `nat` (read at each plan: "cannot" while it is not there), and the fit says "differs"
+  (one service can reach another's ports there), which asks accept_differs; the firewall's plan carries no route (the
+  Windows firewall's own stack). HNS hands out the addresses (no `--ip` until it is checked on the engine's own NAT
+  network) and Docker's own names find a container by its name (no network aliases). Its segments are that one shared
+  `hns-nat` segment, its members by their containers' labels.
+- **Ports**: WinNAT's mappings on this PC's IPv4 addresses; a port meant for this PC alone "differs" (Windows' NAT takes
+  no host address, so it is published on every address too, and Windows Firewall decides who reaches it).
+- **Data and files**: named volumes at the image's `C:\` paths; seeds as one tar at `C:\`; a readable file by
+  `cmd /S /C type` while it runs, `docker cp` when stopped; an update's backup through the image's own tar.exe (`run
+  --rm --network none --isolation ...`), a rollback's put back after the image's PowerShell empties the volume.
+- **Its page** gains Liminal's services, Waiting for your answer, Service plugins and Kept data (the base's), read only
+  once a service plugin asked, a grant, a plan or a work is held, or an engine lists a container named as a service's.
+- **Its own changes guarded**: Remove… of a service's container is refused, pointing at its owner's page; its own change
+  hooks (start_container, stop_container, remove_container, launch_sandbox, stop_sandbox) are its page's alone
+  (PAGE_ONLY_HOOKS, N1 a); its reads are declared (READ_HOOKS: engines, containers, images, sandboxes).
+- Its API card names every command a service's plans run (create, cp, rename, run, exec, logs, inspect, volume ls,
+  inspect, create and rm, network inspect nat, image inspect, pull), each with what it is used for.
+- Tests: `test_services.py` (a Windows engine on the library's FakeDocker taught docker.exe's pipe and Windows' paths,
+  beside the stand-in firewall and service plugins on a real apps.App: the exact argv at the pipe, the canary secret,
+  the isolation from recorded builds, a Linux image refused, GoCD and Buildbot "not yet", the nat network never made or
+  removed, the engines not ready, the guards, the conformance sequence); each of its 24 gates taken out once made a
+  test fail.
+
 ## 0.2.1 (2026-11-15)
 
 Drawn under the platform's Virtualization plugins section, in the list on the left (the user: "platform needs a virtualization plugins section"; "just like cloud plugins"; "docker, libvirt, kubernetes, lxc should be in virtualization"): `SECTION = "virtualization"`, liminal-libs 1.51.0's machine-plugin attribute. liminal-platform 0.26.0 draws it; an older platform keeps the plugin under Machine plugins. Nothing else changes.

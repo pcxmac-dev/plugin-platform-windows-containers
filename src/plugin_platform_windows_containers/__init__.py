@@ -17,6 +17,13 @@ container started, stopped or removed; a sandbox launched (with a .wsb's setting
 Present when this Windows has Windows containers or Windows Sandbox turned on; not for Linux or macOS. What was read is kept
 READ_S; a change reads again. Nothing runs between asks.
 
+Since 0.3.0 it hosts Liminal's services (liminal-libs 1.93.0's ContainerHost, the one "run a service" interface) on each
+Docker engine for Windows containers at its own pipe (services.py: the library's DockerRuntime, docker.exe run directly
+and windowless, never a PowerShell script): Windows images alone, each part's isolation chosen from its pinned build
+against this Windows'; the engine's one NAT network joined, never made ("differs", N26); GoCD and Buildbot "not yet"
+(decision 14 a); a service plugin's plan in its own words, approved on the page; its "page" services stopped with the
+platform and when it is turned off.
+
     python -m plugin_platform_windows_containers status | engines | containers | images | sandboxes
                                                  | start CONTAINER | stop CONTAINER | remove CONTAINER [--force]
                                                  | sandbox [FILE.wsb] [--accept] | close-sandbox ID     ([--engine KEY])
@@ -32,15 +39,17 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from liminal_libs.machines.plugin import CommandError, MachinePlugin
+from liminal_libs.machines.containerhost import ContainerHost, Outside
+from liminal_libs.machines.containers import Aspect, Fit, Target
+from liminal_libs.machines.plugin import CommandError
 from liminal_libs.machines.windows import ELEVATE_VAR, PowerShell
 
 from . import apis as cards
-from . import scripts, wsb
+from . import scripts, services, wsb
 from .engines import (CONTAINER_ID, Container, Engine, compute_systems, containerd_engine, denied_words, docker_engine, json_doc,
                       native, runs_here, server_name, short, words)
 
-__version__ = "0.2.1"
+__version__ = "0.3.0"
 READ_S = 10.0  # what was read is kept this long: the page's status, the tray's presence and a hook's look share it
 ON, OFF, ABSENT = 1, 2, 3  # Win32_OptionalFeature.InstallState
 CONTAINERS, SANDBOX, HYPERV = "Containers", "Containers-DisposableClientVM", "Microsoft-Hyper-V"
@@ -297,8 +306,10 @@ class _Kept:
         self.at = 0.0
 
 
-class WindowsContainersPlugin(MachinePlugin):
-    """Windows containers and Windows Sandbox on this PC: present when either is turned on."""
+class WindowsContainersPlugin(ContainerHost):
+    """Windows containers and Windows Sandbox on this PC: present when either is turned on; and since 0.3.0 the one "run
+    a service" interface (liminal-libs 1.93.0's ContainerHost) on each Docker engine for Windows containers at its
+    pipe."""
 
     name = "windows-containers"
     title = "Windows containers"
@@ -312,11 +323,16 @@ class WindowsContainersPlugin(MachinePlugin):
     order = 745
     ICON = "scan"  # a box's corners: what runs inside is kept within them
     SECTION = "virtualization"  # drawn under the platform's Virtualization plugins (liminal-platform 0.26.0)
-    HOOKS = (*MachinePlugin.HOOKS, "engines", "containers", "images", "sandboxes", "start_container", "stop_container",
+    RUNTIME = "windows-containers"
+    HOOKS = (*ContainerHost.HOOKS, "engines", "containers", "images", "sandboxes", "start_container", "stop_container",
              "remove_container", "launch_sandbox", "stop_sandbox")
+    READ_HOOKS = ("engines", "containers", "images", "sandboxes")  # its own reads, declared (0.3.0) beside the base's
+    # its own changes, from its page alone (0.3.0; the networking design's §8.1, N1 a): no other plugin asks them
+    PAGE_ONLY_HOOKS = ("start_container", "stop_container", "remove_container", "launch_sandbox", "stop_sandbox")
 
     def __init__(self, powershell: PowerShell | None = None, system: str | None = None, env=None, clock=None,
-                 folder: Path | None = None, exists=None):
+                 folder: Path | None = None, exists=None, service_runner=None, streamer=None,
+                 outside: Outside | None = None):
         self.ps = powershell if powershell is not None else PowerShell()
         self._system = sys.platform if system is None else system  # a test's; this machine's otherwise
         self._env = env  # where LIMINAL_ELEVATE is read (a test's; os.environ otherwise)
@@ -324,6 +340,11 @@ class WindowsContainersPlugin(MachinePlugin):
         self._folder = Path(folder) if folder is not None else None  # where .wsb files are looked for (wsb.sandboxes_dir())
         self._exists = exists or os.path.isdir  # a mapped folder checked on this PC (a test's stand-in)
         self._kept = _Kept()
+        # (argv, timeout, stdin=, env=, binary=, out=) -> (code, out, err): a service's docker.exe commands (0.3.0),
+        # services.service_run unless given; (argv, timeout, line, stop) -> (code, errors): a pull's, services.stream
+        self._service_runner = service_runner
+        self._streamer = streamer
+        ContainerHost.__init__(self, outside or Outside(clock=self._clock, holders=self._port_holders, env=env))
 
     @property
     def folder(self) -> Path:
@@ -429,16 +450,20 @@ class WindowsContainersPlugin(MachinePlugin):
         return wsb.listed(self.folder, exists=self._exists)
 
     def engines(self) -> list[dict]:
+        """The engines found for Windows containers (Docker's at each pipe, containerd's), read again now."""
         return [e.describe() for e in self.usable().engines]
 
     def containers(self) -> list[dict]:
+        """The Windows containers on the engines that answer, with their isolation, read again now."""
         return [c.describe() for c in self.usable().containers]
 
     def images(self) -> list[dict]:
+        """The images on the engines that answer, each with its Windows build and how this Windows runs it."""
         r = self.usable()
         return [{**i.describe(), "runsHere": runs_here(r.host_build, r.client, i.build)} for i in r.images]
 
     def sandboxes(self) -> dict:
+        """Windows Sandbox: whether it is on, its command, the sandboxes running and the .wsb files found."""
         r = self.usable()
         return {"on": r.sandbox_on, "command": r.sandbox.cli, "program": r.sandbox.classic, "running": list(r.sandbox.running),
                 "processes": list(r.sandbox.processes), "folder": str(self.folder),
@@ -472,6 +497,10 @@ class WindowsContainersPlugin(MachinePlugin):
                            "empty": "The Host Compute Service runs nothing now."})
         out["tables"] = tables
         out["forms"] = forms(r, configs)
+        if r.containers_on:  # 0.3.0: Liminal's services, the plans waiting, the service plugins, kept data
+            hosted = self.service_status()
+            out["tables"] += hosted.get("tables") or []
+            out["forms"] += hosted.get("forms") or []
         if r.sandbox_on and r.sandbox.program:
             out["actions"] = [{"form": "sandbox", "title": "Launch Windows Sandbox…",
                                "note": "with a .wsb's settings (said first), or Windows Sandbox's own"}]
@@ -617,12 +646,113 @@ class WindowsContainersPlugin(MachinePlugin):
         e, c = self._container(name, engine, container_id)
         if c.state == "removing":
             raise ValueError(f"{c.name} is being removed already")
+        sid = self._service_of(e, c)
+        if sid:  # 0.3.0: a service's container is removed by its own plugin's Remove…, which keeps its data rules
+            raise Refusal(f"{c.name} is the container of Liminal's service {sid}: remove it on {sid.split('/', 1)[0]}'s page "
+                          "(its Remove… keeps its volumes and says what stays)")
         force = c.up
         if force and not truthy(accept_force):
             raise Refusal(f"{c.name} was not removed: it is {c.state}, so removing it ends it at once, and what it has not saved "
                           "is lost.", accept="accept_force")
         self._change(scripts.container(e.exe, e.endpoint or None, "rm", c.id, force=force), 150)
         return {"said": f"{c.name} removed", "lines": [f"its image {c.image} stays"], "ok": True}
+
+    def _service_of(self, e: Engine, c: Container) -> str:
+        """The service a container is (its liminal.service label), asked only of a container named as Liminal names
+        them, on an engine that hosts services."""
+        if not c.name.startswith("liminal-") or e.kind != "docker":
+            return ""
+        try:
+            return self._runtime(e).service_of(c.name)
+        except Exception:  # noqa: BLE001 - its labels cannot be read: named as a service's, so refused all the same
+            return "a service of Liminal's (its labels could not be read)"
+
+    # -- the one "run a service" interface (0.3.0, liminal-libs 1.93.0's ContainerHost) --------------------------------
+    def runtime_targets(self) -> list[Target]:
+        """Each Docker engine for Windows containers at its own pipe, ready while it answers (an engine reached at two
+        pipes, once). One denied, not answering, or running Linux containers (Docker Desktop: no plugin switches it) is
+        not ready, and is asked nothing more; containerd through nerdctl is listed, not offered yet."""
+        if self.not_for_here():
+            return []
+        r = self.read()
+        out = []
+        build = f"Windows build {r.host_build}" if r.host_build else "this Windows' build not read"
+        for e in r.engines:
+            if e.same_as:
+                continue
+            if e.kind == "containerd":
+                state, why = "not offered", ("containerd through nerdctl: listed, not offered until its port mappings and "
+                                             "restart choices are checked")
+            elif e.answers and not e.windows:
+                state, why = "other kind", (f"{e.title} runs {e.os_type or 'other'} containers now: the Docker plugin hosts "
+                                            "those, and no plugin switches its kind")
+            elif e.denied:
+                state, why = "denied", f"its pipe answers administrators and its group only: {DOCKER_RIGHTS}"
+            elif not e.answers:
+                state, why = "not answering", e.why or "it does not answer"
+            elif not r.docker:
+                state, why = "not answering", "docker.exe was not found"
+            else:
+                state, why = "ready", ""
+            where = ("in Docker Desktop's data folder" if e.desktop else
+                     "in the engine's data folder (C:\\ProgramData\\docker\\volumes)")
+            out.append(Target(id=e.key, plugin=self.name, title=f"{e.title} {e.version} at {e.key} ({build})".replace("  ", " "),
+                              mechanism="nerdctl" if e.kind == "containerd" else "docker-windows", system="windows",
+                              arch="amd64", here=True, state=state, why=why, reach="127.0.0.1", path="direct",
+                              lan_words=services.LAN_WORDS, firewall="windows", stack="windows",
+                              platform=self._platform(), where_data=where, version=e.version))
+        return out
+
+    def _runtime(self, e: Engine) -> services.WindowsRuntime:
+        r = self.read()
+        return services.WindowsRuntime(r.docker or e.exe, e.endpoint, self._service_command, self._streamer or services.stream,
+                                       version=e.version, host_build=r.host_build, client=r.client, hyperv=r.on(HYPERV),
+                                       where_data=("in Docker Desktop's data folder" if e.desktop else
+                                                   "in the engine's data folder (C:\\ProgramData\\docker\\volumes)"))
+
+    def runtime_of(self, target: Target) -> services.WindowsRuntime:
+        """That engine's WindowsRuntime: docker.exe at its pipe, the service runner and the streamer."""
+        e = self.read().engine(target.id)
+        if e is None or not e.listed or e.kind != "docker":
+            raise Refusal(f"{target.id} does not answer for Windows containers now: {e.why if e and e.why else 'it is not here'}")
+        return self._runtime(e)
+
+    def hosting(self, owner: str = "", specs=None) -> dict:
+        """The base's answer; and for GoCD and Buildbot, which hand a Linux spec alone, each target's fit says "not yet"
+        (decision 14 a: their makers publish no Windows image)."""
+        out = ContainerHost.hosting(self, owner, specs)
+        given = dict(specs or {}) if isinstance(specs, dict) else {}
+        who = str(owner or next((s.get("owner") for s in given.values() if isinstance(s, dict)), "") or "")
+        if who in services.NOT_YET and not given.get("windows"):
+            for row in out["targets"]:
+                if row.get("fit") is None:
+                    row["fit"] = Fit.judged({"image": Aspect("cannot", services.NOT_YET[who])}).as_dict()
+        return out
+
+    def service_reads_wanted(self) -> bool:
+        """Whether its page reads its engines' services now: once a service plugin asked, a grant was made, a plan or a
+        work is held, or an engine lists a container named as Liminal names a service's; otherwise its page asks nothing
+        more than before 0.3.0."""
+        if self._svc.plans.waiting() or self._svc.works.all() or self._svc.askers or self.grants():
+            return True
+        return any(c.name.startswith("liminal-") for c in self.read().containers)
+
+    def _service_command(self, argv, timeout, stdin=None, env=None, binary=False, out=None):
+        if self._service_runner is not None:
+            return self._service_runner(argv, timeout, stdin=stdin, env=env, binary=binary, out=out)
+        return services.service_run(argv, timeout, stdin=stdin, env=env, binary=binary, out=out)
+
+    def _port_holders(self, port: int) -> list[str]:
+        """Who listens on `port` of this machine, from its socket table (nothing is sent anywhere): each program in
+        words; [] when none, or when the table cannot be read."""
+        try:
+            from liminal_libs import resources
+            from liminal_libs.machines.modelserver import held_words, holders
+
+            held = holders(int(port), resources.default_probe())
+            return [held_words(int(port), held)] if held else []
+        except Exception:  # noqa: BLE001 - a table that cannot be read: no holder known
+            return []
 
     def launch_sandbox(self, path=None, accept_settings=False, seen=None) -> dict:
         """Windows Sandbox started: with a .wsb's settings (said and accepted first: `accept_settings`, or `seen`, the file's
